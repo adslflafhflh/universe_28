@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Tau Ceti System</title>
+
+<style>
+body{
+  margin:0;
+  overflow:hidden;
+  background:black;
+  font-family:Arial;
+}
+#ui{
+  position:absolute;
+  top:10px;
+  left:10px;
+  width:300px;
+  background:rgba(0,0,0,0.75);
+  color:white;
+  padding:15px;
+  border-radius:10px;
+  z-index:10;
+}
+button,input{
+  width:100%;
+  margin-top:8px;
+  padding:8px;
+}
+#objectInfo{
+  position:absolute;
+  right:10px;
+  top:10px;
+  width:330px;
+  background:rgba(0,0,0,0.82);
+  color:white;
+  padding:15px;
+  border-radius:10px;
+  display:none;
+  z-index:10;
+  line-height:1.5;
+}
+.info{
+  position:absolute;
+  bottom:10px;
+  left:10px;
+  color:#aaa;
+  font-size:12px;
+}
+</style>
+</head>
+
+<body>
+
+<div id="ui">
+  <h2>🌌 Tau Ceti System</h2>
+
+  <label>时间加速: <span id="speedVal">1</span>x</label>
+  <input type="range" id="timeScale" min="1" max="10000" value="1" step="1">
+
+  <button onclick="toggleView()">切换视角（恒星系 ↔ 银河）</button>
+  <button onclick="resetCamera()">重置相机</button>
+
+  <p>
+    左键拖动：旋转<br>
+    滚轮：缩放<br>
+    点击恒星 / 行星：查看信息
+  </p >
+</div>
+
+<div id="objectInfo"></div>
+
+<div class="info">
+Tau Ceti Interactive Habitable System
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.134.0/examples/js/controls/OrbitControls.js"></script>
+
+<script>
+let scene, camera, renderer, controls;
+let star;
+let clickableObjects = [];
+let planets = [];
+let galaxyPoints;
+let isGalaxyView = false;
+
+let raycaster = new THREE.Raycaster();
+let mouse = new THREE.Vector2();
+
+function init(){
+
+  scene = new THREE.Scene();
+
+  camera = new THREE.PerspectiveCamera(
+    60,
+    window.innerWidth / window.innerHeight,
+    0.1,
+    1000000
+  );
+  camera.position.set(0, 80, 220);
+
+  renderer = new THREE.WebGLRenderer({ antialias:true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(window.devicePixelRatio);
+  document.body.appendChild(renderer.domElement);
+
+  controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+
+  // 星空背景
+  const starsGeometry = new THREE.BufferGeometry();
+  const starsMaterial = new THREE.PointsMaterial({ color:0xffffff, size:0.7 });
+  const starVertices = [];
+
+  for(let i = 0; i < 15000; i++){
+    starVertices.push(
+      THREE.MathUtils.randFloatSpread(5000),
+      THREE.MathUtils.randFloatSpread(5000),
+      THREE.MathUtils.randFloatSpread(5000)
+    );
+  }
+
+  starsGeometry.setAttribute(
+    'position',
+    new THREE.Float32BufferAttribute(starVertices, 3)
+  );
+
+  scene.add(new THREE.Points(starsGeometry, starsMaterial));
+
+  // Tau Ceti 主恒星
+  const starGeometry = new THREE.SphereGeometry(9, 32, 32);
+  const starMaterial = new THREE.MeshBasicMaterial({ color:0xffddaa });
+
+  star = new THREE.Mesh(starGeometry, starMaterial);
+
+  star.userData = {
+    name: "Tau Ceti",
+    info: `
+      <b>Object Type:</b> Main Star<br>
+      <b>Spectral Type:</b> G8V main-sequence star<br>
+      <b>Mass:</b> ~0.69 M☉<br>
+      <b>Radius:</b> ~0.79 R☉<br>
+      <b>Luminosity:</b> ~0.49 L☉<br>
+      <b>Surface Temperature:</b> ~5300 K<br>
+      <b>Rotation Period:</b> ~46 days<br>
+      <b>Estimated Lifetime:</b> Longer than the Sun<br><br>
+      <b>Description:</b><br>
+      Tau Ceti is a stable Sun-like star. In this project, it serves as the host star for the designed habitable super-Earth Tau Ceti x.
+    `
+  };
+
+  scene.add(star);
+  clickableObjects.push(star);
+
+  // 光源
+  scene.add(new THREE.AmbientLight(0x404040));
+
+  const pointLight = new THREE.PointLight(0xffffff, 2, 0);
+  pointLight.position.set(0,0,0);
+  scene.add(pointLight);
+
+  // 宜居带
+  const hzGeometry = new THREE.RingGeometry(60, 105, 64);
+  const hzMaterial = new THREE.MeshBasicMaterial({
+    color:0x00ff88,
+    side:THREE.DoubleSide,
+    transparent:true,
+    opacity:0.15
+  });
+
+  const hz = new THREE.Mesh(hzGeometry, hzMaterial);
+  hz.rotation.x = Math.PI / 2;
+  scene.add(hz);
+
+  // 行星数据
+  const planetData = [
+    {
+      name:"Tau Ceti b",
+      radius:4,
+      distance:28,
+      speed:4.2,
+      color:0xff8844,
+      info:`
+        <b>Type:</b> Hot rocky planet<br>
+        <b>Semi-major Axis:</b> ~0.10 AU<br>
+        <b>Climate:</b> Extremely hot<br>
+        <b>Habitability:</b> Unlikely
+      `
+    },
+    {
+      name:"Tau Ceti c",
+      radius:4.5,
+      distance:40,
+      speed:2.7,
+      color:0xccaa66,
+      info:`
+        <b>Type:</b> Warm rocky planet<br>
+        <b>Semi-major Axis:</b> ~0.20 AU<br>
+        <b>Climate:</b> Very warm<br>
+        <b>Habitability:</b> Low
+      `
+    },
+    {
+      name:"Tau Ceti d",
+      radius:5,
+      distance:55,
+      speed:1.7,
+      color:0x888888,
+      info:`
+        <b>Type:</b> Rocky super-Earth<br>
+        <b>Semi-major Axis:</b> ~0.37 AU<br>
+        <b>Climate:</b> Warm<br>
+        <b>Habitability:</b> Possible but hot
+      `
+    },
+    {
+      name:"Tau Ceti x",
+      radius:8,
+      distance:78,
+      speed:1,
+      color:0x66ccff,
+      info:`
+        <b>Type:</b> Designed Habitable Super-Earth<br><br>
+        <b>Semi-major Axis:</b> 0.83 AU<br>
+        <b>Orbital Period:</b> ~333 Earth days<br>
+        <b>Rotation Period:</b> 28 hours<br>
+        <b>Eccentricity:</b> 0.06<br>
+        <b>Mass:</b> 1.9 M⊕<br>
+        <b>Radius:</b> 1.15 R⊕<br>
+        <b>Gravity:</b> 1.44 g<br>
+        <b>Density:</b> ~6.9 g/cm³<br>
+        <b>Stellar Flux:</b> ~0.71 S⊕<br>
+        <b>Equilibrium Temperature:</b> 255 K<br>
+        <b>Surface Temperature:</b> 280–300 K<br>
+        <b>Atmosphere:</b> N₂-dominated, elevated CO₂, active water cycle<br><br>
+        <b>Description:</b><br>
+        Tau Ceti x is the main designed habitable planet in this model. Its moderate greenhouse atmosphere allows stable liquid water and possible life emergence.
+      `
+    },
+    {
+      name:"Tau Ceti f",
+      radius:6,
+      distance:115,
+      speed:0.55,
+      color:0x3366aa,
+      info:`
+        <b>Type:</b> Cold super-Earth<br>
+        <b>Semi-major Axis:</b> ~1.33 AU<br>
+        <b>Equilibrium Temperature:</b> ~190 K<br>
+        <b>Habitability:</b> Requires strong greenhouse effect
+      `
+    },
+    {
+      name:"Outer Candidate Planet",
+      radius:5,
+      distance:145,
+      speed:0.33,
+      color:0x8888ff,
+      info:`
+        <b>Type:</b> Outer candidate world<br>
+        <b>Climate:</b> Cold<br>
+        <b>Habitability:</b> Low
+      `
+    }
+  ];
+
+  planetData.forEach(data => {
+
+    const geometry = new THREE.SphereGeometry(data.radius, 32, 32);
+    const material = new THREE.MeshPhongMaterial({ color:data.color });
+    const planet = new THREE.Mesh(geometry, material);
+
+    planet.userData = {
+      name:data.name,
+      distance:data.distance,
+      speed:data.speed,
+      angle:Math.random() * Math.PI * 2,
+      info:data.info
+    };
+
+    scene.add(planet);
+    planets.push(planet);
+    clickableObjects.push(planet);
+
+    const orbit = new THREE.EllipseCurve(
+      0, 0,
+      data.distance, data.distance,
+      0, Math.PI * 2,
+      false
+    );
+
+    const points = orbit.getPoints(128);
+    const orbitGeometry = new THREE.BufferGeometry().setFromPoints(points);
+    const orbitMaterial = new THREE.LineBasicMaterial({ color:0x444444 });
+    const orbitLine = new THREE.Line(orbitGeometry, orbitMaterial);
+
+    orbitLine.rotation.x = Math.PI / 2;
+    scene.add(orbitLine);
+  });
+
+  // 银河背景
+  const galaxyGeometry = new THREE.BufferGeometry();
+  const galaxyVertices = [];
+
+  for(let i = 0; i < 10000; i++){
+    const angle = Math.random() * Math.PI * 2;
+    const radius = 400 + Math.random() * 600;
+
+    galaxyVertices.push(
+      Math.cos(angle) * radius + (Math.random() - 0.5) * 120,
+      (Math.random() - 0.5) * 40,
+      Math.sin(angle) * radius + (Math.random() - 0.5) * 120
+    );
+  }
+
+  galaxyGeometry.setAttribute(
+    'position',
+    new THREE.Float32BufferAttribute(galaxyVertices, 3)
+  );
+
+  const galaxyMaterial = new THREE.PointsMaterial({
+    color:0x88aaff,
+    size:1.5,
+    transparent:true,
+    opacity:0.6
+  });
+
+  galaxyPoints = new THREE.Points(galaxyGeometry, galaxyMaterial);
+  galaxyPoints.visible = false;
+  scene.add(galaxyPoints);
+
+  window.addEventListener('resize', onWindowResize);
+  window.addEventListener('click', onMouseClick);
+
+  animate();
+}
+
+function onMouseClick(event){
+
+  if(
+    event.target.closest('#ui') ||
+    event.target.closest('#objectInfo')
+  ){
+    return;
+  }
+
+  mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+  mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+  raycaster.setFromCamera(mouse, camera);
+
+  const intersects = raycaster.intersectObjects(clickableObjects, false);
+  const infoBox = document.getElementById('objectInfo');
+
+  if(intersects.length > 0){
+    const object = intersects[0].object;
+
+    infoBox.style.display = 'block';
+    infoBox.innerHTML = `
+      <h2>${object.userData.name}</h2>
+      <p>${object.userData.info}</p >
+    `;
+  }else{
+    infoBox.style.display = 'none';
+  }
+}
+
+function animate(){
+
+  requestAnimationFrame(animate);
+
+  planets.forEach(p => {
+    p.userData.angle +=
+      p.userData.speed *
+      0.003 *
+      (parseFloat(document.getElementById('timeScale').value) / 50);
+
+    p.position.x = Math.cos(p.userData.angle) * p.userData.distance;
+    p.position.z = Math.sin(p.userData.angle) * p.userData.distance;
+  });
+
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+function toggleView(){
+
+  isGalaxyView = !isGalaxyView;
+
+  if(isGalaxyView){
+    camera.position.set(0, 400, 700);
+    galaxyPoints.visible = true;
+  }else{
+    camera.position.set(0, 80, 220);
+    galaxyPoints.visible = false;
+  }
+
+  controls.update();
+}
+
+function resetCamera(){
+
+  camera.position.set(0, 80, 220);
+  controls.target.set(0, 0, 0);
+  controls.update();
+}
+
+function onWindowResize(){
+
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+init();
+
+document.getElementById('timeScale').addEventListener('input', () => {
+  document.getElementById('speedVal').textContent =
+    document.getElementById('timeScale').value;
+});
+</script>
+
+</body>
+</html>
